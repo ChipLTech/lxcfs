@@ -481,7 +481,10 @@ static int get_hugetlb_total(const char *cgroup, uint64_t *total)
 	if (!copy_path)
 		return log_error_errno(0, ENOMEM, "Failed to allocate memory");
 
-	char *pod_cgroup = gnu_dirname(copy_path);
+	char *pod_cgroup = copy_path;
+	if (NULL != strstr(copy_path, "kubepods/pod")) {
+		pod_cgroup = gnu_dirname(copy_path);
+	}
 	ret = cgroup_ops->get_hugetlb_total(cgroup_ops, pod_cgroup, &memtotal_str);
 	if (ret < 0)
 		return ret;
