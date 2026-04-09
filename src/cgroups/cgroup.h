@@ -151,6 +151,12 @@ struct cgroup_ops {
 	bool (*can_use_swap)(struct cgroup_ops *ops, const char *cgroup);
 	bool (*can_use_zswap)(struct cgroup_ops *ops, const char *cgroup);
 
+	/* hugepage */
+	int (*get_hugetlb_total)(struct cgroup_ops *ops, const char *cgroup,
+			      char **value);
+	int (*get_hugetlb_rsvd_current)(struct cgroup_ops *ops, const char *cgroup,
+			      char **value);
+
 	/* cpuset */
 	int (*get_cpuset_cpus)(struct cgroup_ops *ops, const char *cgroup,
 			       char **value);

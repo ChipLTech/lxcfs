@@ -449,6 +449,56 @@ static int get_min_memlimit(const char *cgroup, bool swap, uint64_t *limit)
 	return 0;
 }
 
+static int get_hugetlb_rsvd_current(const char *cgroup, uint64_t *current)
+{
+	__do_free char *memcurrent_str = NULL;
+	uint64_t memcurrent = UINT64_MAX;
+	int ret;
+
+	ret = cgroup_ops->get_hugetlb_rsvd_current(cgroup_ops, cgroup, &memcurrent_str);
+
+	if (ret < 0)
+		return ret;
+
+	if (memcurrent_str[0]) {
+		ret = safe_uint64(memcurrent_str, &memcurrent, 10);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+	*current = memcurrent;
+	return 0;
+}
+
+static int get_hugetlb_total(const char *cgroup, uint64_t *total)
+{
+	__do_free char *memtotal_str = NULL;
+	__do_free char *copy_path = NULL;
+	uint64_t memtotal = UINT64_MAX;
+	int ret;
+
+	copy_path = strdup(cgroup);
+	if (!copy_path)
+		return log_error_errno(0, ENOMEM, "Failed to allocate memory");
+
+	char *pod_cgroup = copy_path;
+	if (NULL != strstr(copy_path, "kubepods/pod")) {
+		pod_cgroup = gnu_dirname(copy_path);
+	}
+	ret = cgroup_ops->get_hugetlb_total(cgroup_ops, pod_cgroup, &memtotal_str);
+	if (ret < 0)
+		return ret;
+
+	if (memtotal_str[0]) {
+		ret = safe_uint64(memtotal_str, &memtotal, 10);
+		if (ret < 0) {
+			return ret;
+		}
+	}
+	*total = memtotal;
+	return 0;
+}
+
 static inline bool startswith(const char *line, const char *pref)
 {
 	return strncmp(line, pref, strlen(pref)) == 0;
@@ -1402,6 +1452,7 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 	bool wants_zswap = lxcfs_has_opt(fuse_get_context()->private_data, LXCFS_ZSWAP_ON);
 	struct file_info *d = INTTYPE_TO_PTR(fi->fh);
 	uint64_t memlimit = 0, memusage = 0,
+		hugetotal = 0, hugecurrent = 0,
 		 hosttotal = 0, swfree = 0, swusage = 0, swtotal = 0,
 		 memswpriority = 1;
 	struct memory_stat mstat = {};
@@ -1448,6 +1499,14 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 		return read_file_fuse("/proc/meminfo", buf, size, d);
 
 	ret = get_min_memlimit(cgroup, false, &memlimit);
+	if (ret < 0)
+		return read_file_fuse("/proc/meminfo", buf, size, d);
+
+	ret = get_hugetlb_total(cgroup, &hugetotal);
+	if (ret < 0)
+		return read_file_fuse("/proc/meminfo", buf, size, d);
+
+	ret = get_hugetlb_rsvd_current(cgroup, &hugecurrent);
 	if (ret < 0)
 		return read_file_fuse("/proc/meminfo", buf, size, d);
 	/*
@@ -1605,7 +1664,16 @@ static int proc_meminfo_read(char *buf, size_t size, off_t offset,
 			snprintf(lbuf, 100, "AnonHugePages:  %8" PRIu64 " kB\n",
 				 mstat.total_rss_huge / 1024);
 			printme = lbuf;
- 		} else {
+		}else if (startswith(line, "HugePages_Total:")) {
+			snprintf(lbuf, 100, "HugePages_Total: %8" PRIu64 "\n",
+				hugetotal / (1024 * 1024 * 1024));
+			printme = lbuf;
+		}else if (startswith(line, "HugePages_Free:")) {
+			snprintf(lbuf, 100, "HugePages_Free:  %8" PRIu64 "\n",
+				(hugetotal - hugecurrent) / (1024 * 1024 * 1024));
+			printme = lbuf;
+		}
+		else {
  			printme = line;
 		}
 

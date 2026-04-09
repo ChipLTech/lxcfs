@@ -799,6 +799,62 @@ static int cgfsng_get_cpuset_cpus(struct cgroup_ops *ops, const char *cgroup,
 	return -1;
 }
 
+static char *readat_hugepage(int cgroup_fd, const char *cgroup_file)
+{
+	__do_free char *val = NULL;
+
+	val = readat_file(cgroup_fd, cgroup_file);
+	if (val && strcmp(val, "") != 0)
+		return move_ptr(val);
+
+	return NULL;
+}
+
+static int cgfsng_get_hugetlb(struct cgroup_ops *ops, const char *cgroup,
+				  const char *cgroup_file, char **value)
+{
+	__do_close int cgroup_fd = -EBADF;
+	__do_free char *path = NULL;
+	char *v;
+	struct hierarchy *h;
+	int ret;
+
+	h = ops->get_hierarchy(ops, "hugetlb");
+	if (!h)
+		return -1;
+
+	if (!is_unified_hierarchy(h))
+		ret = CGROUP_SUPER_MAGIC;
+	else
+		ret = CGROUP2_SUPER_MAGIC;
+
+	*value = NULL;
+	path = must_make_path_relative(cgroup, NULL);
+
+	cgroup_fd = openat_safe(h->fd, path);
+	if (cgroup_fd < 0)
+		return -1;
+
+	v = readat_hugepage(cgroup_fd, cgroup_file);
+	if (v) {
+		*value = v;
+		return ret;
+	}
+	return -1;
+}
+
+static int cgfsng_get_hugetlb_total(struct cgroup_ops *ops, const char *cgroup,
+				char **value)
+{
+	return cgfsng_get_hugetlb(ops, cgroup, "hugetlb.1GB.max", value);
+}
+
+static int cgfsng_get_hugetlb_rsvd_current(struct cgroup_ops *ops, const char *cgroup,
+				char **value)
+{
+	return cgfsng_get_hugetlb(ops, cgroup, "hugetlb.1GB.rsvd.current", value);
+}
+
 static int cgfsng_get_io(struct cgroup_ops *ops, const char *cgroup,
 			 const char *file, char **value)
 {
@@ -1135,6 +1191,10 @@ struct cgroup_ops *cgfsng_ops_init(void)
 	/* cpuset */
 	cgfsng_ops->get_cpuset_cpus = cgfsng_get_cpuset_cpus;
 	cgfsng_ops->can_use_cpuview = cgfsng_can_use_cpuview;
+
+	/* hugepage */
+	cgfsng_ops->get_hugetlb_total = cgfsng_get_hugetlb_total;
+	cgfsng_ops->get_hugetlb_rsvd_current = cgfsng_get_hugetlb_rsvd_current;
 
 	/* blkio */
 	cgfsng_ops->get_io_service_bytes	= cgfsng_get_io_service_bytes;
